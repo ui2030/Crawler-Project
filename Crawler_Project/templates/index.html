@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>News Crawler</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    <script src="https://d3js.org/d3.v5.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3-cloud/1.2.5/d3.layout.cloud.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>News Crawler</h1>
+        </div>
+        <div class="main-content">
+            <div class="list-container">
+                <h2 class="center">상위 단어 리스트</h2>
+                <ul id="wordlist"></ul>
+            </div>
+            <div class="wordcloud-container">
+                <h2 class="center">워드 클라우드</h2>
+                <div id="wordcloud"></div>
+            </div>
+        </div>
+        <div class="category-bar">
+            <button onclick="loadCategory('정치')">정치</button>
+            <button onclick="loadCategory('경제')">경제</button>
+            <button onclick="loadCategory('사회')">사회</button>
+            <button onclick="loadCategory('생활/문화')">생활/문화</button>
+            <button onclick="loadCategory('IT/과학')">IT/과학</button>
+            <button onclick="loadCategory('세계')">세계</button>
+        </div>
+        <div class="search-bar">
+            <input type="text" id="search-word" placeholder="Search for a word">
+            <button onclick="searchWord()">Search</button>
+        </div>
+        <div class="links-container" id="links"></div>
+    </div>
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>

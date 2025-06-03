@@ -1,0 +1,204 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>New Crawler</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { display:flex; flex-direction:column; align-items:center; gap:16px; margin:0; padding:24px; font-family:system-ui, Arial, sans-serif; }
+    .title { font-size:24px; margin:0; border:1px solid #000; padding:10px 16px; width:80%; text-align:center; }
+    .container { display:flex; justify-content:space-around; width:80%; gap:16px; border:1px solid #000; padding:10px; }
+    .box { width:500px; height:400px; border:1px solid #000; border-radius:6px; display:flex; flex-direction:column; overflow:hidden; background:#fff; }
+    .box h3 { margin:0; padding:8px 12px; border-bottom:1px solid #ddd; font-size:16px; background:#f7f7f7; }
+    .scroll { flex:1; overflow:auto; padding:10px 12px; }
+    .search-bar { width:70%; padding:10px; font-size:16px; border:1px solid #000; border-radius:6px; }
+    ol, ul { margin:0; padding-left:18px; }
+    li { margin:4px 0; line-height:1.4; }
+    a { color:#0a58ca; text-decoration:none; }
+    a:hover { text-decoration:underline; }
+    small { color:#666; }
+    /* 워드클라우드 캔버스는 CSS가 아니라 width/height 속성으로 크기를 정해야 선명합니다. */
+    #wcCanvas { display:block; width:100%; height:100%; }
+  </style>
+  <!-- 워드클라우드 라이브러리 -->
+  <script src="https://cdn.jsdelivr.net/npm/wordcloud@1.2.2/src/wordcloud2.min.js"></script>
+</head>
+<body>
+  <h1 class="title">New Crawler</h1>
+
+  <!-- 상단: TOP20 / 워드클라우드 -->
+  <div class="container">
+    <div class="box">
+      <h3>상위 단어 20</h3>
+      <div class="scroll">
+        <ol class="topwords">
+          {% for item in top20 %}
+            <li>
+              <a href="#" class="kw" data-kw="{{ item.top_words }}">{{ forloop.counter }}. {{ item.top_words }}</a>
+              <small>({{ item.cnt }})</small>
+            </li>
+          {% empty %}
+            <li>데이터가 없습니다.</li>
+          {% endfor %}
+        </ol>
+      </div>
+    </div>
+
+    <div class="box wordcloud-box">
+      <h3>Wordcloud</h3>
+      <!-- 정적 이미지 대신 캔버스 -->
+      <canvas id="wcCanvas"></canvas>
+    </div>
+  </div>
+
+  <!-- 검색창 -->
+  <input id="q" class="search-bar" type="text" placeholder="검색어 입력 후 Enter (또는 위 단어 클릭)">
+
+  <!-- 최근/검색 기사 20 -->
+  <div class="container" style="width:80%;">
+    <div class="box" style="width:100%;">
+      <h3 id="alist-title">최근 기사 20</h3>
+      <div class="scroll">
+        <ul id="articles-list">
+          {% for a in articles %}
+            <li><a href="{{ a.link }}" target="_blank" rel="noopener">{{ a.title }}</a></li>
+          {% empty %}
+            <li>데이터가 없습니다.</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const $q = document.getElementById('q');
+    const $alist = document.getElementById('articles-list');
+    const $title = document.getElementById('alist-title');
+    const $topOl = document.querySelector('.topwords');
+    const $wc = document.getElementById('wcCanvas');
+    let lastWordList = []; // 최근 워드리스트 저장(리사이즈 재그리기용)
+
+    function renderWordcloud(list) {
+    // list: [[word, cnt], ...] 또는 [{word,cnt},...]
+    const pairs = (list || []).map(it => [String(it.word ?? it[0]), Number(it.cnt ?? it[1]) || 1]);
+    if (!pairs.length) {
+      WordCloud($wc, { list: [["데이터없음", 1]], weightFactor: 14, clearCanvas: true });
+      return;
+    }
+
+    // 빈도 범위를 [minFont, maxFont] 픽셀로 선형 매핑
+    const counts = pairs.map(p => p[1]);
+    const minC = Math.min(...counts);
+    const maxC = Math.max(...counts);
+    const minFont = 12, maxFont = 64;
+
+    const weightFactor = (w) => {
+      if (maxC === minC) return (minFont + maxFont) / 2; // 전부 같은 값일 때
+      const t = (w - minC) / (maxC - minC);
+      return minFont + t * (maxFont - minFont);
+    };
+
+    // 캔버스 크기 설정(부모 박스 기준)
+    const card = $wc.parentElement;
+    $wc.width  = card.clientWidth;
+    $wc.height = card.clientHeight - 40; // 헤더 높이 보정
+
+    lastWordList = pairs;
+
+    WordCloud($wc, {
+      list: pairs,                   // [[단어, 가중치]]
+      weightFactor,                  // ← 여기서 폰트 크기 결정
+      gridSize: Math.max(6, Math.round($wc.width / 60)),
+      rotateRatio: 0.3,
+      rotationSteps: 2,
+      minRotation: -Math.PI / 6,
+      maxRotation:  Math.PI / 6,
+      backgroundColor: "#fff",
+      color: (word, w) => `hsl(${(maxC === minC ? 0.5 : (w - minC) / (maxC - minC)) * 300},70%,40%)`,
+      drawOutOfBound: false,
+      shrinkToFit: true,
+      clearCanvas: true,
+    });
+  }
+
+    async function loadArticles(q) {
+      const url = q ? `/api/articles?q=${encodeURIComponent(q)}&limit=20`
+                    : `/api/articles?limit=20`;
+      try {
+        const r = await fetch(url);
+        const data = await r.json();
+        const html = (data || []).map(item => {
+          const title = item.title ?? item[0];
+          const link  = item.link  ?? item[1];
+          return `<li><a href="${link}" target="_blank" rel="noopener">${title}</a></li>`;
+        }).join('');
+        $alist.innerHTML = html || '<li>결과가 없습니다.</li>';
+        $title.textContent = q ? `검색 결과 상위 20: "${q}"` : '최근 기사 20';
+      } catch (e) {
+        console.error(e);
+        $alist.innerHTML = '<li>로드 중 오류가 발생했어요.</li>';
+      }
+    }
+
+    async function loadTopWords(q, isSearch=false) {
+      const url = q
+        ? `/api/topwords?q=${encodeURIComponent(q)}${isSearch ? '&days=0' : ''}`
+        : `/api/topwords`;
+      try {
+        const r = await fetch(url);
+        const data = await r.json();   // [[word, cnt], ...]
+        const html = (data || []).map((it, i) => {
+          const word = it.word ?? it[0];
+          const cnt  = it.cnt  ?? it[1];
+          return `<li>
+            <a href="#" class="kw" data-kw="${word}">${i+1}. ${word}</a>
+            <small>(${cnt})</small>
+          </li>`;
+        }).join('');
+        $topOl.innerHTML = html || '<li>데이터가 없습니다.</li>';
+
+        // 워드클라우드도 즉시 갱신
+        renderWordcloud(data || []);
+
+        // 상위단어 클릭 → 검색 모드로 기사/상위단어 동시 갱신
+        $topOl.querySelectorAll('.kw').forEach(a => {
+          a.addEventListener('click', (e) => {
+            e.preventDefault();
+            const kw = a.dataset.kw || a.textContent.trim();
+            $q.value = kw;
+            loadArticles(kw);
+            loadTopWords(kw, true);
+          });
+        });
+      } catch (e) {
+        console.error(e);
+        $topOl.innerHTML = '<li>로드 중 오류가 발생했어요.</li>';
+      }
+    }
+
+    // Enter → 기사 + 상위단어(검색 모드, 날짜 제한 해제)
+    $q.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        const val = $q.value.trim();
+        loadArticles(val);
+        loadTopWords(val, true);
+      }
+    });
+
+    // 창 리사이즈 시 워드클라우드 재그리기
+    window.addEventListener('resize', () => {
+      if (lastWordList && lastWordList.length) {
+        renderWordcloud(lastWordList);
+      }
+    });
+
+    // 초기 로드(최근 기준)
+    window.addEventListener('DOMContentLoaded', () => {
+      loadArticles('');
+      loadTopWords('');
+    });
+  </script>
+</body>
+</html>
